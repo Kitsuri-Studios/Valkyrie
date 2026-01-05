@@ -19,7 +19,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake pkg-config \
-            libgtk-3-dev libwebkit2gtk-4.0-dev libuv1-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libuv1-dev \
             dpkg-dev rpm
       
       - name: Build QuickJS
@@ -27,14 +27,14 @@ jobs:
           git clone https://github.com/bellard/quickjs.git /tmp/quickjs
           cd /tmp/quickjs
           make libquickjs.a
-          sudo mkdir -p /usr/lib/quickjs
+          sudo mkdir -p /usr/lib/quickjs /usr/include/quickjs
           sudo cp libquickjs.a /usr/lib/quickjs/
-          sudo cp quickjs.h quickjs-libc.h /usr/include/
+          sudo cp quickjs.h quickjs-libc.h /usr/include/quickjs/
       
       - name: Build Valkyrie
         run: |
           mkdir -p build && cd build
-          cmake ..
+          cmake .. -DWEBKIT_VERSION=4.1
           make -j$(nproc)
           strip valkyrie
       
@@ -181,9 +181,9 @@ jobs:
           git clone https://github.com/bellard/quickjs.git /tmp/quickjs
           cd /tmp/quickjs
           make libquickjs.a
-          sudo mkdir -p /usr/local/lib/quickjs
+          sudo mkdir -p /usr/local/lib/quickjs /usr/local/include/quickjs
           sudo cp libquickjs.a /usr/local/lib/quickjs/
-          sudo cp quickjs.h quickjs-libc.h /usr/local/include/
+          sudo cp quickjs.h quickjs-libc.h /usr/local/include/quickjs/
       
       - name: Build Valkyrie
         run: |

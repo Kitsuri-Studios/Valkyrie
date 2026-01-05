@@ -15,8 +15,23 @@ FetchContent_MakeAvailable(webview)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(UV REQUIRED libuv)
-pkg_check_modules(GTK REQUIRED gtk+-3.0)
-pkg_check_modules(WEBKIT REQUIRED webkit2gtk-4.0)
+
+if(APPLE)
+    # macOS uses native WebKit framework
+    find_library(WEBKIT_FRAMEWORK WebKit)
+    if(NOT WEBKIT_FRAMEWORK)
+        message(FATAL_ERROR "WebKit framework not found")
+    endif()
+else()
+    # Linux uses GTK and WebKit2GTK
+    pkg_check_modules(GTK REQUIRED gtk+-3.0)
+    
+    # Try webkit2gtk-4.1 first (Ubuntu 24.04+), fall back to 4.0
+    pkg_check_modules(WEBKIT webkit2gtk-4.1)
+    if(NOT WEBKIT_FOUND)
+        pkg_check_modules(WEBKIT REQUIRED webkit2gtk-4.0)
+    endif()
+endif()
 
 # quickjs doesn't have pkg-config usually
 find_path(QUICKJS_INCLUDE_DIR quickjs.h
@@ -24,7 +39,7 @@ find_path(QUICKJS_INCLUDE_DIR quickjs.h
 )
 find_library(QUICKJS_LIBRARY
     NAMES quickjs libquickjs.a
-    PATHS /usr/lib /usr/local/lib /usr/lib64 /usr/local/lib/quickjs
+    PATHS /usr/lib /usr/local/lib /usr/lib64 /usr/local/lib/quickjs /usr/lib/quickjs
 )
 
 
@@ -40,16 +55,33 @@ target_include_directories(valkyrie PRIVATE
     ${webview_SOURCE_DIR}
     ${UV_INCLUDE_DIRS}
     ${QUICKJS_INCLUDE_DIR}
-    ${GTK_INCLUDE_DIRS}
-    ${WEBKIT_INCLUDE_DIRS}
 )
 
-target_link_libraries(valkyrie 
-    ${UV_LIBRARIES}
-    ${QUICKJS_LIBRARY}
-    ${GTK_LIBRARIES}
-    ${WEBKIT_LIBRARIES}
-    pthread
-    dl
-    m
-)
+if(NOT APPLE)
+    target_include_directories(valkyrie PRIVATE
+        ${GTK_INCLUDE_DIRS}
+        ${WEBKIT_INCLUDE_DIRS}
+    )
+endif()
+
+if(APPLE)
+    target_link_libraries(valkyrie 
+        ${UV_LIBRARIES}
+        ${QUICKJS_LIBRARY}
+        ${WEBKIT_FRAMEWORK}
+        "-framework Cocoa"
+        pthread
+        dl
+        m
+    )
+else()
+    target_link_libraries(valkyrie 
+        ${UV_LIBRARIES}
+        ${QUICKJS_LIBRARY}
+        ${GTK_LIBRARIES}
+        ${WEBKIT_LIBRARIES}
+        pthread
+        dl
+        m
+    )
+endif()
