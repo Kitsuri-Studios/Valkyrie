@@ -40,18 +40,19 @@ jobs:
       
       - name: Create DEB package
         run: |
-          mkdir -p valkyrie_${{ github.ref_name }}_${{ matrix.arch }}/DEBIAN
-          mkdir -p valkyrie_${{ github.ref_name }}_${{ matrix.arch }}/usr/local/bin
-          cp build/valkyrie valkyrie_${{ github.ref_name }}_${{ matrix.arch }}/usr/local/bin/
-          cat > valkyrie_${{ github.ref_name }}_${{ matrix.arch }}/DEBIAN/control << EOF
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir -p valkyrie_${VERSION}_${{ matrix.arch }}/DEBIAN
+          mkdir -p valkyrie_${VERSION}_${{ matrix.arch }}/usr/local/bin
+          cp build/valkyrie valkyrie_${VERSION}_${{ matrix.arch }}/usr/local/bin/
+          cat > valkyrie_${VERSION}_${{ matrix.arch }}/DEBIAN/control << EOF
           Package: valkyrie
-          Version: ${{ github.ref_name }}
+          Version: ${VERSION}
           Architecture: ${{ matrix.arch }}
           Maintainer: Kitsuri Studios <contact@kitsuri.dev>
           Description: Native Desktop Application Framework
           Depends: libgtk-3-0, libwebkit2gtk-4.0-37, libuv1
           EOF
-          dpkg-deb --build valkyrie_${{ github.ref_name }}_${{ matrix.arch }}
+          dpkg-deb --build valkyrie_${VERSION}_${{ matrix.arch }}
       
       - name: Create RPM package
         run: |
@@ -164,75 +165,76 @@ jobs:
           name: windows-amd64
           path: "*.zip"
 
-  build-macos:
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [arm64, x86_64]
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install dependencies
-        run: |
-          brew install cmake pkg-config libuv
-      
-      - name: Build QuickJS
-        run: |
-          git clone https://github.com/bellard/quickjs.git /tmp/quickjs
-          cd /tmp/quickjs
-          make libquickjs.a
-          sudo mkdir -p /usr/local/lib/quickjs /usr/local/include/quickjs
-          sudo cp libquickjs.a /usr/local/lib/quickjs/
-          sudo cp quickjs.h quickjs-libc.h /usr/local/include/quickjs/
-      
-      - name: Build Valkyrie
-        run: |
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
-          make -j$(sysctl -n hw.ncpu)
-          strip valkyrie || true
-      
-      - name: Create .app bundle
-        run: |
-          mkdir -p Valkyrie.app/Contents/{MacOS,Resources}
-          cp build/valkyrie Valkyrie.app/Contents/MacOS/valkyrie
-          cat > Valkyrie.app/Contents/Info.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleName</key><string>Valkyrie</string>
-            <key>CFBundleDisplayName</key><string>Valkyrie</string>
-            <key>CFBundleIdentifier</key><string>dev.kitsuri.valkyrie</string>
-            <key>CFBundleVersion</key><string>${{ github.ref_name }}</string>
-            <key>CFBundleExecutable</key><string>valkyrie</string>
-            <key>CFBundlePackageType</key><string>APPL</string>
-          </dict>
-          </plist>
-          EOF
-      
-      - name: Create DMG
-        run: |
-          hdiutil create -volname Valkyrie -srcfolder Valkyrie.app -ov -format UDZO \
-            valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}.dmg
-      
-      - name: Create tarball
-        run: |
-          mkdir -p valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}
-          cp build/valkyrie valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}/
-          cp README.md LICENSE valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}/
-          tar -czvf valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}.tar.gz valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}
-      
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ matrix.arch }}
-          path: |
-            *.dmg
-            *.tar.gz
+  # macOS build disabled for v1 - needs platform-specific fixes
+  # build-macos:
+  #   runs-on: macos-latest
+  #   strategy:
+  #     matrix:
+  #       arch: [arm64, x86_64]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     
+  #     - name: Install dependencies
+  #       run: |
+  #         brew install cmake pkg-config libuv
+  #     
+  #     - name: Build QuickJS
+  #       run: |
+  #         git clone https://github.com/bellard/quickjs.git /tmp/quickjs
+  #         cd /tmp/quickjs
+  #         make libquickjs.a
+  #         sudo mkdir -p /usr/local/lib/quickjs /usr/local/include/quickjs
+  #         sudo cp libquickjs.a /usr/local/lib/quickjs/
+  #         sudo cp quickjs.h quickjs-libc.h /usr/local/include/quickjs/
+  #     
+  #     - name: Build Valkyrie
+  #       run: |
+  #         mkdir -p build && cd build
+  #         cmake .. -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+  #         make -j$(sysctl -n hw.ncpu)
+  #         strip valkyrie || true
+  #     
+  #     - name: Create .app bundle
+  #       run: |
+  #         mkdir -p Valkyrie.app/Contents/{MacOS,Resources}
+  #         cp build/valkyrie Valkyrie.app/Contents/MacOS/valkyrie
+  #         cat > Valkyrie.app/Contents/Info.plist << EOF
+  #         <?xml version="1.0" encoding="UTF-8"?>
+  #         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+  #         <plist version="1.0">
+  #         <dict>
+  #           <key>CFBundleName</key><string>Valkyrie</string>
+  #           <key>CFBundleDisplayName</key><string>Valkyrie</string>
+  #           <key>CFBundleIdentifier</key><string>dev.kitsuri.valkyrie</string>
+  #           <key>CFBundleVersion</key><string>${{ github.ref_name }}</string>
+  #           <key>CFBundleExecutable</key><string>valkyrie</string>
+  #           <key>CFBundlePackageType</key><string>APPL</string>
+  #         </dict>
+  #         </plist>
+  #         EOF
+  #     
+  #     - name: Create DMG
+  #       run: |
+  #         hdiutil create -volname Valkyrie -srcfolder Valkyrie.app -ov -format UDZO \
+  #           valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}.dmg
+  #     
+  #     - name: Create tarball
+  #       run: |
+  #         mkdir -p valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}
+  #         cp build/valkyrie valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}/
+  #         cp README.md LICENSE valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}/
+  #         tar -czvf valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}.tar.gz valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}
+  #     
+  #     - name: Upload artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: macos-${{ matrix.arch }}
+  #         path: |
+  #           *.dmg
+  #           *.tar.gz
 
   release:
-    needs: [build-linux, build-windows, build-macos]
+    needs: [build-linux, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
