@@ -255,15 +255,6 @@ jobs:
         with:
           name: windows-${{ matrix.arch }}
           path: "*.zip"
-          cp valkyrie.exe valkyrie-${{ github.ref_name }}-windows-amd64/
-          cp README.md LICENSE valkyrie-${{ github.ref_name }}-windows-amd64/
-          zip -r valkyrie-${{ github.ref_name }}-windows-amd64.zip valkyrie-${{ github.ref_name }}-windows-amd64
-      
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-amd64
-          path: "*.zip"
 
   # macOS build disabled for v1 - needs platform-specific fixes
   # build-macos:
