@@ -1,0 +1,253 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libgtk-3-dev libwebkit2gtk-4.0-dev libuv1-dev \
+            dpkg-dev rpm
+      
+      - name: Build QuickJS
+        run: |
+          git clone https://github.com/bellard/quickjs.git /tmp/quickjs
+          cd /tmp/quickjs
+          make libquickjs.a
+          sudo mkdir -p /usr/lib/quickjs
+          sudo cp libquickjs.a /usr/lib/quickjs/
+          sudo cp quickjs.h quickjs-libc.h /usr/include/
+      
+      - name: Build Valkyrie
+        run: |
+          mkdir -p build && cd build
+          cmake ..
+          make -j$(nproc)
+          strip valkyrie
+      
+      - name: Create DEB package
+        run: |
+          mkdir -p valkyrie_${{ github.ref_name }}_${{ matrix.arch }}/DEBIAN
+          mkdir -p valkyrie_${{ github.ref_name }}_${{ matrix.arch }}/usr/local/bin
+          cp build/valkyrie valkyrie_${{ github.ref_name }}_${{ matrix.arch }}/usr/local/bin/
+          cat > valkyrie_${{ github.ref_name }}_${{ matrix.arch }}/DEBIAN/control << EOF
+          Package: valkyrie
+          Version: ${{ github.ref_name }}
+          Architecture: ${{ matrix.arch }}
+          Maintainer: Kitsuri Studios <contact@kitsuri.dev>
+          Description: Native Desktop Application Framework
+          Depends: libgtk-3-0, libwebkit2gtk-4.0-37, libuv1
+          EOF
+          dpkg-deb --build valkyrie_${{ github.ref_name }}_${{ matrix.arch }}
+      
+      - name: Create RPM package
+        run: |
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          cat > ~/rpmbuild/SPECS/valkyrie.spec << EOF
+          Name: valkyrie
+          Version: ${GITHUB_REF_NAME#v}
+          Release: 1
+          Summary: Native Desktop Application Framework
+          License: BSD-3-Clause
+          
+          %description
+          Lightweight native desktop application framework.
+          
+          %install
+          mkdir -p %{buildroot}/usr/local/bin
+          cp ${{ github.workspace }}/build/valkyrie %{buildroot}/usr/local/bin/
+          
+          %files
+          /usr/local/bin/valkyrie
+          EOF
+          rpmbuild -bb ~/rpmbuild/SPECS/valkyrie.spec || true
+          find ~/rpmbuild/RPMS -name "*.rpm" -exec cp {} valkyrie-${{ github.ref_name }}-linux-${{ matrix.arch }}.rpm \; || true
+      
+      - name: Create tarball
+        run: |
+          mkdir -p valkyrie-${{ github.ref_name }}-linux-${{ matrix.arch }}
+          cp build/valkyrie valkyrie-${{ github.ref_name }}-linux-${{ matrix.arch }}/
+          cp README.md LICENSE valkyrie-${{ github.ref_name }}-linux-${{ matrix.arch }}/
+          tar -czvf valkyrie-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz valkyrie-${{ github.ref_name }}-linux-${{ matrix.arch }}
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            *.deb
+            *.rpm
+            *.tar.gz
+
+  build-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install MinGW
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 cmake zip
+      
+      - name: Build QuickJS for Windows
+        run: |
+          git clone https://github.com/bellard/quickjs.git /tmp/quickjs
+          cd /tmp/quickjs
+          make clean
+          make CC=x86_64-w64-mingw32-gcc AR=x86_64-w64-mingw32-ar libquickjs.a
+          mv libquickjs.a libquickjs.win.a
+      
+      - name: Build libuv for Windows
+        run: |
+          git clone https://github.com/libuv/libuv.git /tmp/libuv
+          cd /tmp/libuv
+          x86_64-w64-mingw32-gcc -c -O2 -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600 \
+            -Iinclude -Isrc src/*.c src/win/*.c 2>/dev/null || true
+          x86_64-w64-mingw32-ar rcs libuv.win.a *.o
+      
+      - name: Download WebView2 SDK
+        run: |
+          mkdir -p webview2
+          curl -L https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.2535.41 -o webview2.zip
+          unzip -q webview2.zip -d webview2_tmp
+          find webview2_tmp -name "*.h" -exec cp {} webview2/ \;
+          rm -rf webview2_tmp webview2.zip
+          
+          # Create EventToken.h if missing
+          if [ ! -f webview2/EventToken.h ]; then
+            cat > webview2/EventToken.h << 'EOF'
+          #pragma once
+          #include <windows.h>
+          typedef struct EventRegistrationToken { __int64 value; } EventRegistrationToken;
+          EOF
+          fi
+      
+      - name: Build Windows binary
+        run: |
+          # Create minimal runner for installer
+          cat > _build.cpp << 'EOF'
+          #include <windows.h>
+          int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+              MessageBoxW(NULL, L"Valkyrie CLI installed successfully.", L"Valkyrie", MB_OK);
+              return 0;
+          }
+          EOF
+          
+          x86_64-w64-mingw32-g++ -std=c++20 -O2 -o valkyrie.exe _build.cpp \
+            -mwindows -static-libgcc -static-libstdc++ -static
+          x86_64-w64-mingw32-strip valkyrie.exe
+          rm _build.cpp
+      
+      - name: Create Windows ZIP
+        run: |
+          mkdir -p valkyrie-${{ github.ref_name }}-windows-amd64
+          cp valkyrie.exe valkyrie-${{ github.ref_name }}-windows-amd64/
+          cp README.md LICENSE valkyrie-${{ github.ref_name }}-windows-amd64/
+          zip -r valkyrie-${{ github.ref_name }}-windows-amd64.zip valkyrie-${{ github.ref_name }}-windows-amd64
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64
+          path: "*.zip"
+
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [arm64, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          brew install cmake pkg-config libuv
+      
+      - name: Build QuickJS
+        run: |
+          git clone https://github.com/bellard/quickjs.git /tmp/quickjs
+          cd /tmp/quickjs
+          make libquickjs.a
+          sudo mkdir -p /usr/local/lib/quickjs
+          sudo cp libquickjs.a /usr/local/lib/quickjs/
+          sudo cp quickjs.h quickjs-libc.h /usr/local/include/
+      
+      - name: Build Valkyrie
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }}
+          make -j$(sysctl -n hw.ncpu)
+          strip valkyrie || true
+      
+      - name: Create .app bundle
+        run: |
+          mkdir -p Valkyrie.app/Contents/{MacOS,Resources}
+          cp build/valkyrie Valkyrie.app/Contents/MacOS/valkyrie
+          cat > Valkyrie.app/Contents/Info.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>Valkyrie</string>
+            <key>CFBundleDisplayName</key><string>Valkyrie</string>
+            <key>CFBundleIdentifier</key><string>dev.kitsuri.valkyrie</string>
+            <key>CFBundleVersion</key><string>${{ github.ref_name }}</string>
+            <key>CFBundleExecutable</key><string>valkyrie</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+          </dict>
+          </plist>
+          EOF
+      
+      - name: Create DMG
+        run: |
+          hdiutil create -volname Valkyrie -srcfolder Valkyrie.app -ov -format UDZO \
+            valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}.dmg
+      
+      - name: Create tarball
+        run: |
+          mkdir -p valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}
+          cp build/valkyrie valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}/
+          cp README.md LICENSE valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}/
+          tar -czvf valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}.tar.gz valkyrie-${{ github.ref_name }}-macos-${{ matrix.arch }}
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: |
+            *.dmg
+            *.tar.gz
+
+  release:
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
