@@ -53,7 +53,9 @@
     #include <winsock2.h>
 #endif
 
-#include <core/include/webview.h>
+#ifndef VALKYRIE_NO_WEBVIEW
+    #include <core/include/webview.h>
+#endif
 #include <quickjs/quickjs.h>
 #include <uv.h>
 

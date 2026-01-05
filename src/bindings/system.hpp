@@ -52,7 +52,9 @@
 #else
     #include <unistd.h>
     #include <sys/wait.h>
-    #include <gtk/gtk.h>
+    #ifndef VALKYRIE_NO_WEBVIEW
+        #include <gtk/gtk.h>
+    #endif
 #endif
 
 namespace valkyrie {

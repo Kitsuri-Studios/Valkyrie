@@ -40,7 +40,9 @@
 
 #include "../bindings/system.hpp"
 
-#include <core/include/webview.h>
+#ifndef VALKYRIE_NO_WEBVIEW
+    #include <core/include/webview.h>
+#endif
 #include <string>
 #include <deque>
 #include <mutex>
