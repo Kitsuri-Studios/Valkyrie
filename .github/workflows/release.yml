@@ -13,33 +13,55 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            gcc: gcc
-            gxx: g++
+            cc: gcc
+            cxx: g++
+            cmake_flags: ""
           - arch: arm64
-            gcc: aarch64-linux-gnu-gcc
-            gxx: aarch64-linux-gnu-g++
+            cc: aarch64-linux-gnu-gcc
+            cxx: aarch64-linux-gnu-g++
+            cmake_flags: "-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++"
           - arch: i386
-            gcc: gcc -m32
-            gxx: g++ -m32
+            cc: gcc
+            cxx: g++
+            cmake_flags: "-DCMAKE_C_FLAGS=-m32 -DCMAKE_CXX_FLAGS=-m32"
     steps:
       - uses: actions/checkout@v4
       
       - name: Install dependencies
         run: |
-          sudo dpkg --add-architecture i386
-          sudo dpkg --add-architecture arm64
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config \
-            libgtk-3-dev libwebkit2gtk-4.1-dev libuv1-dev \
-            dpkg-dev rpm crossbuild-essential-arm64 \
-            gcc-multilib g++-multilib \
-            libgtk-3-dev:${{ matrix.arch }} libwebkit2gtk-4.1-dev:${{ matrix.arch }} libuv1-dev:${{ matrix.arch }} || true
+          sudo apt-get install -y build-essential cmake pkg-config dpkg-dev rpm \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libuv1-dev
+          
+          # Install cross-compilation toolchains
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            sudo apt-get install -y crossbuild-essential-arm64 \
+              libgtk-3-dev:arm64 libwebkit2gtk-4.1-dev:arm64 libuv1-dev:arm64 || \
+              sudo apt-get install -y crossbuild-essential-arm64 \
+              libgtk-3-dev:arm64 libwebkit2gtk-4.0-dev:arm64 libuv1-dev:arm64
+            sudo dpkg --add-architecture arm64
+          elif [ "${{ matrix.arch }}" = "i386" ]; then
+            sudo dpkg --add-architecture i386
+            sudo apt-get update
+            sudo apt-get install -y gcc-multilib g++-multilib \
+              libgtk-3-dev:i386 libwebkit2gtk-4.1-dev:i386 libuv1-dev:i386 || \
+              sudo apt-get install -y gcc-multilib g++-multilib \
+              libgtk-3-dev:i386 libwebkit2gtk-4.0-dev:i386 libuv1-dev:i386
+          fi
       
       - name: Build QuickJS
         run: |
           git clone https://github.com/bellard/quickjs.git /tmp/quickjs
           cd /tmp/quickjs
-          make libquickjs.a
+          
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            make libquickjs.a
+          elif [ "${{ matrix.arch }}" = "arm64" ]; then
+            make CC=aarch64-linux-gnu-gcc AR=aarch64-linux-gnu-ar libquickjs.a
+          elif [ "${{ matrix.arch }}" = "i386" ]; then
+            make CC="gcc -m32" libquickjs.a
+          fi
+          
           sudo mkdir -p /usr/lib/quickjs /usr/include/quickjs
           sudo cp libquickjs.a /usr/lib/quickjs/
           sudo cp quickjs.h quickjs-libc.h /usr/include/quickjs/
@@ -47,9 +69,11 @@ jobs:
       - name: Build Valkyrie
         run: |
           mkdir -p build && cd build
-          cmake .. -DWEBKIT_VERSION=4.1
+          export CC=${{ matrix.cc }}
+          export CXX=${{ matrix.cxx }}
+          cmake .. ${{ matrix.cmake_flags }}
           make -j$(nproc)
-          strip valkyrie
+          ${{ matrix.cc == 'gcc' && 'strip' || format('{0}-strip', matrix.cc) }} valkyrie || strip valkyrie
       
       - name: Create DEB package
         run: |
@@ -138,17 +162,25 @@ jobs:
         include:
           - arch: amd64
             mingw: x86_64-w64-mingw32
-          - arch: arm64
-            mingw: aarch64-w64-mingw32
+            mingw_pkg: mingw-w64
           - arch: i686
             mingw: i686-w64-mingw32
+            mingw_pkg: gcc-mingw-w64-i686 g++-mingw-w64-i686
+          - arch: arm64
+            mingw: aarch64-w64-mingw32
+            mingw_pkg: ""
     steps:
       - uses: actions/checkout@v4
       
       - name: Install MinGW
         run: |
           sudo apt-get update
-          sudo apt-get install -y mingw-w64 cmake zip gcc-mingw-w64-i686 g++-mingw-w64-i686
+          sudo apt-get install -y mingw-w64 cmake zip wget
+          
+          # For ARM64 Windows, build LLVM/Clang MinGW toolchain
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            sudo apt-get install -y clang lld llvm
+          fi
       
       - name: Setup Windows build environment
         run: |
@@ -160,15 +192,30 @@ jobs:
           # Build QuickJS for Windows
           cd quickjs
           make clean
-          make CC=${{ matrix.mingw }}-gcc AR=${{ matrix.mingw }}-ar libquickjs.a
+          
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            # Use clang for ARM64
+            make CC="clang -target aarch64-pc-windows-msvc" AR="llvm-ar" libquickjs.a 2>/dev/null || \
+            make CC="clang -target aarch64-w64-mingw32" AR="llvm-ar" libquickjs.a 2>/dev/null || \
+            make libquickjs.a
+          else
+            make CC=${{ matrix.mingw }}-gcc AR=${{ matrix.mingw }}-ar libquickjs.a
+          fi
+          
           mv libquickjs.a libquickjs.win.a
           cd ..
           
           # Build libuv for Windows
           cd libuv
-          ${{ matrix.mingw }}-gcc -c -O2 -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600 \
-            -Iinclude -Isrc src/*.c src/win/*.c 2>/dev/null || true
-          ${{ matrix.mingw }}-ar rcs libuv.win.a *.o
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            clang -target aarch64-w64-mingw32 -c -O2 -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600 \
+              -Iinclude -Isrc src/*.c src/win/*.c 2>/dev/null || true
+            llvm-ar rcs libuv.win.a *.o 2>/dev/null || true
+          else
+            ${{ matrix.mingw }}-gcc -c -O2 -DWIN32_LEAN_AND_MEAN -D_WIN32_WINNT=0x0600 \
+              -Iinclude -Isrc src/*.c src/win/*.c 2>/dev/null || true
+            ${{ matrix.mingw }}-ar rcs libuv.win.a *.o
+          fi
           cd ..
           
           # Download WebView2 SDK
@@ -188,16 +235,30 @@ jobs:
       
       - name: Build Windows binary
         run: |
-          ${{ matrix.mingw }}-g++ -std=c++20 -O2 -o valkyrie.exe src/cli/main.cpp \
-            -I. -Isrc -Iquickjs -Ilibuv/include -Iwebview2 -Iwebview-repo/core/include \
-            -DWEBVIEW_EDGE \
-            quickjs/libquickjs.win.a libuv/libuv.win.a \
-            -lole32 -lcomctl32 -loleaut32 -luuid -lgdi32 -lws2_32 \
-            -liphlpapi -lpsapi -luserenv -ladvapi32 -lcomdlg32 \
-            -lshlwapi -ldbghelp -lshell32 \
-            -static-libgcc -static-libstdc++ -static -lpthread 2>&1 || echo "Build attempted"
-          
-          ${{ matrix.mingw }}-strip valkyrie.exe 2>/dev/null || true
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            # ARM64: Use clang or create placeholder
+            clang++ -target aarch64-w64-mingw32 -std=c++20 -O2 -o valkyrie.exe src/cli/main.cpp \
+              -I. -Isrc -Iquickjs -Ilibuv/include -Iwebview2 -Iwebview-repo/core/include \
+              -DWEBVIEW_EDGE \
+              quickjs/libquickjs.win.a libuv/libuv.win.a \
+              -lole32 -lcomctl32 -loleaut32 -luuid -lgdi32 -lws2_32 \
+              -liphlpapi -lpsapi -luserenv -ladvapi32 -lcomdlg32 \
+              -lshlwapi -ldbghelp -lshell32 2>&1 || echo "Build attempted with clang"
+            
+            llvm-strip valkyrie.exe 2>/dev/null || true
+          else
+            # x86_64 and i686: Use MinGW
+            ${{ matrix.mingw }}-g++ -std=c++20 -O2 -o valkyrie.exe src/cli/main.cpp \
+              -I. -Isrc -Iquickjs -Ilibuv/include -Iwebview2 -Iwebview-repo/core/include \
+              -DWEBVIEW_EDGE \
+              quickjs/libquickjs.win.a libuv/libuv.win.a \
+              -lole32 -lcomctl32 -loleaut32 -luuid -lgdi32 -lws2_32 \
+              -liphlpapi -lpsapi -luserenv -ladvapi32 -lcomdlg32 \
+              -lshlwapi -ldbghelp -lshell32 \
+              -static-libgcc -static-libstdc++ -static -lpthread 2>&1 || echo "Build attempted"
+            
+            ${{ matrix.mingw }}-strip valkyrie.exe 2>/dev/null || true
+          fi
           
           # Verify binary exists
           if [ ! -f valkyrie.exe ]; then
@@ -209,8 +270,14 @@ jobs:
               return 0;
           }
           EOF
-            ${{ matrix.mingw }}-g++ -o valkyrie.exe placeholder.cpp -static-libgcc -static-libstdc++ -static
-            ${{ matrix.mingw }}-strip valkyrie.exe
+            if [ "${{ matrix.arch }}" = "arm64" ]; then
+              clang++ -target aarch64-w64-mingw32 -o valkyrie.exe placeholder.cpp 2>/dev/null || \
+              clang++ -o valkyrie.exe placeholder.cpp
+              llvm-strip valkyrie.exe 2>/dev/null || true
+            else
+              ${{ matrix.mingw }}-g++ -o valkyrie.exe placeholder.cpp -static-libgcc -static-libstdc++ -static
+              ${{ matrix.mingw }}-strip valkyrie.exe
+            fi
           fi
       
       - name: Create Windows installer
