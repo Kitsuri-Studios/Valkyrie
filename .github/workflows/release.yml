@@ -115,41 +115,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install cross-compilation tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-            cmake pkg-config dpkg-dev rpm git
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
       
-      - name: Build QuickJS for ARM64
+      - name: Build in ARM64 container
         run: |
-          git clone https://github.com/bellard/quickjs.git /tmp/quickjs
-          cd /tmp/quickjs
-          make CC=aarch64-linux-gnu-gcc AR=aarch64-linux-gnu-ar libquickjs.a
-          sudo mkdir -p /usr/lib/quickjs /usr/include/quickjs
-          sudo cp libquickjs.a /usr/lib/quickjs/
-          sudo cp quickjs.h quickjs-libc.h /usr/include/quickjs/
-      
-      - name: Build libuv for ARM64
-        run: |
-          git clone https://github.com/libuv/libuv.git /tmp/libuv
-          cd /tmp/libuv
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
-            -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64
-          make -j$(nproc)
-      
-      - name: Build Valkyrie for ARM64 (CLI-only)
-        run: |
-          mkdir -p build && cd build
-          aarch64-linux-gnu-g++ -std=c++20 -O2 -DVALKYRIE_NO_WEBVIEW -o valkyrie ../src/cli/main.cpp \
-            -I.. -I../src -I/tmp/quickjs -I/tmp/libuv/include \
-            -L/tmp/libuv/build \
-            /usr/lib/quickjs/libquickjs.a \
-            /tmp/libuv/build/libuv.a \
-            -lpthread -ldl -lm -static-libgcc -static-libstdc++
-          aarch64-linux-gnu-strip valkyrie 2>/dev/null || true
+          docker run --rm --platform linux/arm64 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            arm64v8/ubuntu:24.04 bash -c "
+            apt-get update
+            apt-get install -y build-essential cmake pkg-config git \
+              libgtk-3-dev libwebkit2gtk-4.1-dev libuv1-dev dpkg-dev rpm
+            
+            # Build QuickJS
+            git clone https://github.com/bellard/quickjs.git /tmp/quickjs
+            cd /tmp/quickjs
+            make libquickjs.a
+            mkdir -p /usr/lib/quickjs /usr/include/quickjs
+            cp libquickjs.a /usr/lib/quickjs/
+            cp quickjs.h quickjs-libc.h /usr/include/quickjs/
+            
+            # Build Valkyrie
+            cd /workspace
+            mkdir -p build && cd build
+            cmake .. -DWEBKIT_VERSION=4.1
+            make -j\$(nproc)
+            strip valkyrie
+          "
       
       
       - name: Create packages
@@ -233,42 +228,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install 32-bit dependencies
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib cmake pkg-config \
-            dpkg-dev rpm git
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: 386
       
-      - name: Build QuickJS for i386
+      - name: Build in i386 container
         run: |
-          git clone https://github.com/bellard/quickjs.git /tmp/quickjs
-          cd /tmp/quickjs
-          make CC="gcc -m32" libquickjs.a
-          sudo mkdir -p /usr/lib/quickjs /usr/include/quickjs
-          sudo cp libquickjs.a /usr/lib/quickjs/
-          sudo cp quickjs.h quickjs-libc.h /usr/include/quickjs/
-      
-      - name: Build libuv for i386
-        run: |
-          git clone https://github.com/libuv/libuv.git /tmp/libuv
-          cd /tmp/libuv
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_C_FLAGS="-m32" -DCMAKE_CXX_FLAGS="-m32" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-m32" -DCMAKE_EXE_LINKER_FLAGS="-m32"
-          make -j$(nproc)
-          sudo make install
-      
-      - name: Build Valkyrie for i386 (CLI-only, no WebView)
-        run: |
-          mkdir -p build && cd build
-          # i386 WebKit not available, build CLI-only version
-          g++ -m32 -std=c++20 -O2 -DVALKYRIE_NO_WEBVIEW -o valkyrie ../src/cli/main.cpp \
-            -I.. -I../src -I/tmp/quickjs -I/tmp/libuv/include \
-            -L/tmp/libuv/build \
-            /usr/lib/quickjs/libquickjs.a \
-            -luv -lpthread -ldl -lm -static-libgcc -static-libstdc++
-          strip valkyrie 2>/dev/null || true
+          docker run --rm --platform linux/386 \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            i386/ubuntu:24.04 bash -c "
+            apt-get update
+            apt-get install -y build-essential cmake pkg-config git \
+              libgtk-3-dev libwebkit2gtk-4.1-dev libuv1-dev dpkg-dev rpm
+            
+            # Build QuickJS
+            git clone https://github.com/bellard/quickjs.git /tmp/quickjs
+            cd /tmp/quickjs
+            make libquickjs.a
+            mkdir -p /usr/lib/quickjs /usr/include/quickjs
+            cp libquickjs.a /usr/lib/quickjs/
+            cp quickjs.h quickjs-libc.h /usr/include/quickjs/
+            
+            # Build Valkyrie
+            cd /workspace
+            mkdir -p build && cd build
+            cmake .. -DWEBKIT_VERSION=4.1
+            make -j\$(nproc)
+            strip valkyrie
+          "
       
       - name: Create packages
         run: |
