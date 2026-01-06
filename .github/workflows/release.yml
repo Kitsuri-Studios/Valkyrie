@@ -111,40 +111,32 @@ jobs:
             *.tar.gz
   
   build-linux-arm64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@v4
       
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-      
-      - name: Build in ARM64 container
+      - name: Install dependencies
         run: |
-          docker run --rm --platform linux/arm64 \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            arm64v8/ubuntu:24.04 bash -c "
-            apt-get update
-            apt-get install -y build-essential cmake pkg-config git \
-              libgtk-3-dev libwebkit2gtk-4.1-dev libuv1-dev dpkg-dev rpm
-            
-            # Build QuickJS
-            git clone https://github.com/bellard/quickjs.git /tmp/quickjs
-            cd /tmp/quickjs
-            make libquickjs.a
-            mkdir -p /usr/lib/quickjs /usr/include/quickjs
-            cp libquickjs.a /usr/lib/quickjs/
-            cp quickjs.h quickjs-libc.h /usr/include/quickjs/
-            
-            # Build Valkyrie
-            cd /workspace
-            mkdir -p build && cd build
-            cmake .. -DWEBKIT_VERSION=4.1
-            make -j\$(nproc)
-            strip valkyrie
-          "
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libuv1-dev \
+            dpkg-dev rpm git
+      
+      - name: Build QuickJS
+        run: |
+          git clone https://github.com/bellard/quickjs.git /tmp/quickjs
+          cd /tmp/quickjs
+          make libquickjs.a
+          sudo mkdir -p /usr/lib/quickjs /usr/include/quickjs
+          sudo cp libquickjs.a /usr/lib/quickjs/
+          sudo cp quickjs.h quickjs-libc.h /usr/include/quickjs/
+      
+      - name: Build Valkyrie
+        run: |
+          mkdir -p build && cd build
+          cmake .. -DWEBKIT_VERSION=4.1
+          make -j$(nproc)
+          strip valkyrie
       
       
       - name: Create packages
@@ -223,73 +215,6 @@ jobs:
             *.pkg.tar.zst
             *.tar.gz
   
-  build-linux-i386:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: 386
-      
-      - name: Build in i386 container
-        run: |
-          docker run --rm --platform linux/386 \
-            -v ${{ github.workspace }}:/workspace \
-            -w /workspace \
-            i386/ubuntu:24.04 bash -c "
-            apt-get update
-            apt-get install -y build-essential cmake pkg-config git \
-              libgtk-3-dev libwebkit2gtk-4.1-dev libuv1-dev dpkg-dev rpm
-            
-            # Build QuickJS
-            git clone https://github.com/bellard/quickjs.git /tmp/quickjs
-            cd /tmp/quickjs
-            make libquickjs.a
-            mkdir -p /usr/lib/quickjs /usr/include/quickjs
-            cp libquickjs.a /usr/lib/quickjs/
-            cp quickjs.h quickjs-libc.h /usr/include/quickjs/
-            
-            # Build Valkyrie
-            cd /workspace
-            mkdir -p build && cd build
-            cmake .. -DWEBKIT_VERSION=4.1
-            make -j\$(nproc)
-            strip valkyrie
-          "
-      
-      - name: Create packages
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          
-          # DEB
-          mkdir -p valkyrie_${VERSION}_i386/DEBIAN
-          mkdir -p valkyrie_${VERSION}_i386/usr/local/bin
-          cp build/valkyrie valkyrie_${VERSION}_i386/usr/local/bin/
-          cat > valkyrie_${VERSION}_i386/DEBIAN/control << EOF
-          Package: valkyrie
-          Version: ${VERSION}
-          Architecture: i386
-          Maintainer: Kitsuri Studios <studio@kitsuri.dev>
-          Description: Native Desktop Application Framework
-          Depends: libgtk-3-0, libwebkit2gtk-4.0-37, libuv1
-          EOF
-          dpkg-deb --build valkyrie_${VERSION}_i386
-          
-          # Tarball
-          mkdir -p valkyrie-${{ github.ref_name }}-linux-i386
-          cp build/valkyrie README.md LICENSE valkyrie-${{ github.ref_name }}-linux-i386/
-          tar -czvf valkyrie-${{ github.ref_name }}-linux-i386.tar.gz valkyrie-${{ github.ref_name }}-linux-i386
-      
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-i386
-          path: |
-            *.deb
-            *.tar.gz
-
   build-windows:
     runs-on: ubuntu-latest
     strategy:
@@ -345,8 +270,12 @@ jobs:
       
       - name: Build Windows binary
         run: |
+          # Create proper webview include structure
+          mkdir -p _deps/webview-src/core/include
+          cp -r webview-repo/core/include/* _deps/webview-src/core/include/
+          
           ${{ matrix.mingw }}-g++ -std=c++20 -O2 -o valkyrie.exe src/cli/main.cpp \
-            -I. -Isrc -Iquickjs -Ilibuv/include -Iwebview2 -Iwebview-repo/core/include \
+            -I. -Isrc -Iquickjs -Ilibuv/include -Iwebview2 -I_deps/webview-src \
             -DWEBVIEW_EDGE \
             quickjs/libquickjs.win.a libuv/libuv.win.a \
             -lole32 -lcomctl32 -loleaut32 -luuid -lgdi32 -lws2_32 \
@@ -482,7 +411,7 @@ jobs:
   #           *.tar.gz
 
   release:
-    needs: [build-linux-amd64, build-linux-arm64, build-linux-i386, build-windows]
+    needs: [build-linux-amd64, build-linux-arm64, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
