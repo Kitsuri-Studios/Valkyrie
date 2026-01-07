@@ -2,7 +2,7 @@
 
 Lightweight Native Desktop Application Framework. Write once, run on Linux and Windows. Minimal binary size using system WebView.
 
-## Overview
+## Overview 
 
 A CLI tool for building native desktop applications with HTML, CSS, and JavaScript. Uses the system WebView for minimal binary size: webkit2gtk on Linux, Edge WebView2 on Windows.
 
