@@ -5,7 +5,7 @@ Lightweight Native Desktop Application Framework. Write once, run on Linux and W
 ## Overview 
 
 A CLI tool for building native desktop applications with HTML, CSS, and JavaScript. Uses the system WebView for minimal binary size: webkit2gtk on Linux, Edge WebView2 on Windows.
-
+  
 ### Features
 
 - Vanilla JavaScript
